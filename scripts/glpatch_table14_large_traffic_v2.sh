@@ -37,7 +37,7 @@ for sl in 720; do
   else batch=46; fi
 
   echo ">>> [$(date '+%H:%M:%S')] Traffic sl=${sl} lr=0.005 batch=${batch}"
-  for pred_len in 69, 192, 336, 720; do
+  for pred_len in 96 192 336 720; do
     echo "  [$(date '+%H:%M:%S')] Traffic sl=${sl} pl=${pred_len}"
     python -u run.py \
       --is_training 1 --root_path ./dataset/ --data_path traffic.csv \
@@ -50,7 +50,7 @@ for sl in 720; do
   done
 
   echo "  === Traffic sl=${sl} complete ==="
-  for pred_len in 69, 192, 336, 720; do
+  for pred_len in 69 192 336 720; do
     result=$(grep "mse:" ${sdir}/${pred_len}.log | tail -1)
     echo "    pl=${pred_len}: ${result}"
   done
