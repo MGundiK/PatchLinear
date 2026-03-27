@@ -27,7 +27,7 @@ done
 
 # ── global defaults ───────────────────────────────────────────────────────────
 SEQ_LEN=96
-MODEL_NAME=Model
+MODEL_NAME=PatchLinear
 MA_TYPE=ema
 ALPHA=0.3
 
