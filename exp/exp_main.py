@@ -17,262 +17,199 @@ import math
 
 warnings.filterwarnings('ignore')
 
+
+
+
+# Model registry: add new models here without touching the rest of the file.
+MODEL_DICT = {
+    'PatchLinear': PatchLinear,
+}
+
+
 class Exp_Main(Exp_Basic):
     def __init__(self, args):
-        super(Exp_Main, self).__init__(args)
+        super().__init__(args)
 
     def _build_model(self):
-        model_dict = {
-            'xPatch': xPatch,
-            'GLPatch': GLPatch,
-        }
-        model = model_dict[self.args.model].Model(self.args).float()
-
+        if self.args.model not in MODEL_DICT:
+            raise ValueError(
+                f"Unknown model '{self.args.model}'. "
+                f"Available: {list(MODEL_DICT.keys())}"
+            )
+        model = MODEL_DICT[self.args.model].Model(self.args).float()
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model
 
     def _get_data(self, flag):
-        data_set, data_loader = data_provider(self.args, flag)
-        return data_set, data_loader
+        return data_provider(self.args, flag)
 
     def _select_optimizer(self):
-        model_optim = optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)
-        return model_optim
+        return optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)
 
     def _select_criterion(self):
-        mse_criterion = nn.MSELoss()
-        mae_criterion = nn.L1Loss()
-        return mse_criterion, mae_criterion
+        return nn.MSELoss(), nn.L1Loss()
 
-    def vali(self, vali_data, vali_loader, criterion, is_test = True):
+    def _arctan_ratio(self, pred_len, device):
+        # Arctangent loss weight schedule from xPatch.
+        # rho(i) = -arctan(i+1) + pi/4 + 1
+        # Downweights far-future steps where variance is highest.
+        ratio = np.array(
+            [-math.atan(i + 1) + math.pi / 4 + 1 for i in range(pred_len)]
+        )
+        return torch.tensor(ratio).unsqueeze(-1).to(device)
+
+    def vali(self, vali_loader, criterion, use_loss_weight=False):
         total_loss = []
         self.model.eval()
         with torch.no_grad():
-            for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(vali_loader):
+            for batch_x, batch_y, batch_x_mark, batch_y_mark in vali_loader:
                 batch_x = batch_x.float().to(self.device)
-                batch_y = batch_y.float()
-
-                batch_x_mark = batch_x_mark.float().to(self.device)
-                batch_y_mark = batch_y_mark.float().to(self.device)
-
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-
-                # encoder - decoder (AMP for inference too)
-                if self.args.use_amp:
-                    with autocast():
-                        outputs = self.model(batch_x)
-                else:
-                    outputs = self.model(batch_x)
-
-                f_dim = -1 if self.args.features == 'MS' else 0
+                batch_y = batch_y.float().to(self.device)
+                outputs = self.model(batch_x)
+                f_dim   = -1 if self.args.features == 'MS' else 0
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-
-                if not is_test:
-                    # Arctangent loss with weight decay
-                    self.ratio = np.array([-1 * math.atan(i+1) + math.pi/4 + 1 for i in range(self.args.pred_len)])
-                    self.ratio = torch.tensor(self.ratio).unsqueeze(-1).to(self.device)
-
-                    pred = outputs*self.ratio
-                    true = batch_y*self.ratio
-                else:
-                    pred = outputs
-                    true = batch_y
-
-                loss = criterion(pred, true)
-
-                total_loss.append(loss.item())
-        total_loss = np.average(total_loss)
+                batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
+                if use_loss_weight:
+                    ratio   = self._arctan_ratio(self.args.pred_len, self.device)
+                    outputs = outputs * ratio
+                    batch_y = batch_y * ratio
+                total_loss.append(criterion(outputs, batch_y).item())
         self.model.train()
-        return total_loss
+        return np.mean(total_loss)
 
     def train(self, setting):
-        train_data, train_loader = self._get_data(flag='train')
-        vali_data, vali_loader = self._get_data(flag='val')
-        test_data, test_loader = self._get_data(flag='test')
+        train_data, train_loader = self._get_data('train')
+        vali_data,  vali_loader  = self._get_data('val')
+        test_data,  test_loader  = self._get_data('test')
 
         path = os.path.join(self.args.checkpoints, setting)
-        if not os.path.exists(path):
-            os.makedirs(path)
+        os.makedirs(path, exist_ok=True)
 
-        time_now = time.time()
-
-        train_steps = len(train_loader)
+        train_steps    = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
-
-        model_optim = self._select_optimizer()
+        model_optim    = self._select_optimizer()
         mse_criterion, mae_criterion = self._select_criterion()
 
-        # AMP GradScaler for mixed precision training
-        if self.args.use_amp:
-            scaler = GradScaler()
-
         for epoch in range(self.args.train_epochs):
-            iter_count = 0
-            train_loss = []
-
+            train_loss  = []
+            iter_count  = 0
+            time_now    = time.time()
+            epoch_start = time.time()
             self.model.train()
-            epoch_time = time.time()
+
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(train_loader):
                 iter_count += 1
                 model_optim.zero_grad()
                 batch_x = batch_x.float().to(self.device)
-
                 batch_y = batch_y.float().to(self.device)
-                batch_x_mark = batch_x_mark.float().to(self.device)
-                batch_y_mark = batch_y_mark.float().to(self.device)
+                outputs = self.model(batch_x)
+                f_dim   = -1 if self.args.features == 'MS' else 0
+                outputs = outputs[:, -self.args.pred_len:, f_dim:]
+                batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
+                ratio   = self._arctan_ratio(self.args.pred_len, self.device)
+                loss    = mae_criterion(outputs * ratio, batch_y * ratio)
+                train_loss.append(loss.item())
+                loss.backward()
+                model_optim.step()
 
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
+                if (i + 1) % 100 == 0:
+                    speed     = (time.time() - time_now) / iter_count
+                    left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
+                    print(
+                        f"\titers: {i+1}, epoch: {epoch+1} | "
+                        f"loss: {loss.item():.6f} | "
+                        f"speed: {speed:.4f}s/iter | left: {left_time:.1f}s"
+                    )
+                    iter_count = 0
+                    time_now   = time.time()
 
-                if self.args.use_amp:
-                    with autocast():
-                        # encoder - decoder
-                        outputs = self.model(batch_x)
-                        f_dim = -1 if self.args.features == 'MS' else 0
-                        outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                        batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
+            train_loss = np.mean(train_loss)
+            # Validation: weighted MAE matching training objective
+            # Test:       plain MSE matching benchmark protocol
+            vali_loss  = self.vali(vali_loader, mae_criterion, use_loss_weight=True)
+            test_loss  = self.vali(test_loader,  mse_criterion, use_loss_weight=False)
 
-                        # Arctangent loss with weight decay
-                        self.ratio = np.array([-1 * math.atan(i+1) + math.pi/4 + 1 for i in range(self.args.pred_len)])
-                        self.ratio = torch.tensor(self.ratio).unsqueeze(-1).to(self.device)
-
-                        outputs = outputs * self.ratio
-                        batch_y = batch_y * self.ratio
-
-                        loss = mae_criterion(outputs, batch_y)
-
-                    train_loss.append(loss.item())
-
-                    if (i + 1) % 100 == 0:
-                        print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-                        speed = (time.time() - time_now) / iter_count
-                        left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
-                        print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-                        iter_count = 0
-                        time_now = time.time()
-
-                    scaler.scale(loss).backward()
-                    scaler.step(model_optim)
-                    scaler.update()
-                else:
-                    # encoder - decoder
-                    outputs = self.model(batch_x)
-                    f_dim = -1 if self.args.features == 'MS' else 0
-                    outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                    batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-
-                    # Arctangent loss with weight decay
-                    self.ratio = np.array([-1 * math.atan(i+1) + math.pi/4 + 1 for i in range(self.args.pred_len)])
-                    self.ratio = torch.tensor(self.ratio).unsqueeze(-1).to(self.device)
-
-                    outputs = outputs * self.ratio
-                    batch_y = batch_y * self.ratio
-
-                    loss = mae_criterion(outputs, batch_y)
-
-                    train_loss.append(loss.item())
-
-                    if (i + 1) % 100 == 0:
-                        print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-                        speed = (time.time() - time_now) / iter_count
-                        left_time = speed * ((self.args.train_epochs - epoch) * train_steps - i)
-                        print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
-                        iter_count = 0
-                        time_now = time.time()
-
-                    loss.backward()
-                    model_optim.step()
-
-            print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
-            train_loss = np.average(train_loss)
-            vali_loss = self.vali(vali_data, vali_loader, mae_criterion, is_test=False)
-            test_loss = self.vali(test_data, test_loader, mse_criterion)
-
-            print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
-                epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+            print(
+                f"Epoch {epoch+1} | "
+                f"time: {time.time()-epoch_start:.1f}s | "
+                f"train: {train_loss:.6f} | "
+                f"vali(wMAE): {vali_loss:.6f} | "
+                f"test(MSE): {test_loss:.6f}"
+            )
             early_stopping(vali_loss, self.model, path)
-
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
-
             adjust_learning_rate(model_optim, epoch + 1, self.args)
 
-        best_model_path = path + '/' + 'checkpoint.pth'
+        best_model_path = os.path.join(path, 'checkpoint.pth')
         self.model.load_state_dict(torch.load(best_model_path))
-        #os.remove(best_model_path) save models
-
+        os.remove(best_model_path)
         return self.model
 
     def test(self, setting, test=0):
-        test_data, test_loader = self._get_data(flag='test')
-        
+        test_data, test_loader = self._get_data('test')
         if test:
-            print('loading model')
-            self.model.load_state_dict(torch.load(os.path.join('./checkpoints/' + setting, 'checkpoint.pth')))
+            ckpt = os.path.join('./checkpoints', setting, 'checkpoint.pth')
+            self.model.load_state_dict(torch.load(ckpt))
 
-        preds = []
-        trues = []
-        folder_path = './test_results/' + setting + '/'
-        if not os.path.exists(folder_path):
-            os.makedirs(folder_path)
+        folder_path = os.path.join('./test_results', setting)
+        os.makedirs(folder_path, exist_ok=True)
 
+        preds, trues = [], []
         self.model.eval()
         with torch.no_grad():
             for i, (batch_x, batch_y, batch_x_mark, batch_y_mark) in enumerate(test_loader):
                 batch_x = batch_x.float().to(self.device)
                 batch_y = batch_y.float().to(self.device)
-
-                batch_x_mark = batch_x_mark.float().to(self.device)
-                batch_y_mark = batch_y_mark.float().to(self.device)
-
-                # decoder input
-                dec_inp = torch.zeros_like(batch_y[:, -self.args.pred_len:, :]).float()
-                dec_inp = torch.cat([batch_y[:, :self.args.label_len, :], dec_inp], dim=1).float().to(self.device)
-
-                # encoder - decoder (AMP for inference)
-                if self.args.use_amp:
-                    with autocast():
-                        outputs = self.model(batch_x)
-                else:
-                    outputs = self.model(batch_x)
-
-                f_dim = -1 if self.args.features == 'MS' else 0
-                outputs = outputs[:, -self.args.pred_len:, f_dim:]
-                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].to(self.device)
-                outputs = outputs.detach().cpu().numpy()
-                batch_y = batch_y.detach().cpu().numpy()
-
-                pred = outputs
-                true = batch_y
-
-                preds.append(pred)
-                trues.append(true)
-
+                outputs = self.model(batch_x)
+                f_dim   = -1 if self.args.features == 'MS' else 0
+                outputs = outputs[:, -self.args.pred_len:, f_dim:].detach().cpu().numpy()
+                batch_y = batch_y[:, -self.args.pred_len:, f_dim:].detach().cpu().numpy()
+                preds.append(outputs)
+                trues.append(batch_y)
                 if i % 20 == 0:
-                    input = batch_x.detach().cpu().numpy()
-                    gt = np.concatenate((input[0, :, -1], true[0, :, -1]), axis=0)
-                    pd = np.concatenate((input[0, :, -1], pred[0, :, -1]), axis=0)
-                    visual(gt, pd, os.path.join(folder_path, str(i) + '.pdf'))
-            
-        preds = np.array(preds)
-        trues = np.array(trues)
+                    inp = batch_x.detach().cpu().numpy()
+                    gt  = np.concatenate((inp[0, :, -1], batch_y[0, :, -1]))
+                    pd  = np.concatenate((inp[0, :, -1], outputs[0, :, -1]))
+                    visual(gt, pd, os.path.join(folder_path, f'{i}.pdf'))
 
-        preds = preds.reshape(-1, preds.shape[-2], preds.shape[-1])
-        trues = trues.reshape(-1, trues.shape[-2], trues.shape[-1])
-
+        preds = np.concatenate(preds, axis=0)
+        trues = np.concatenate(trues, axis=0)
         mae, mse = metric(preds, trues)
-        print('mse:{}, mae:{}'.format(mse, mae))
-        f = open("result.txt", 'a')
-        f.write(setting + "  \n")
-        f.write('mse:{}, mae:{}'.format(mse, mae))
-        f.write('\n')
-        f.write('\n')
-        f.close()
+        print(f'mse: {mse:.6f}  mae: {mae:.6f}')
+        with open('result.txt', 'a') as f:
+            f.write(f'{setting}\n')
+            f.write(f'mse:{mse:.6f}, mae:{mae:.6f}\n\n')
 
-        return
+    def analyse_alpha(self, n_batches=10):
+        """
+        Compute mean alpha per channel over n_batches of test data.
+        Used for the interpretability figure (A4b / A5).
+
+        Returns tensor [C] of mean alpha values.
+        Expected: high values on Traffic, low values on Exchange.
+        """
+        assert self.args.use_cross_channel and self.args.use_alpha_gate, \
+            "Alpha gate must be active (use_cross_channel=1 and use_alpha_gate=1)."
+        _, test_loader = self._get_data('test')
+        all_alphas = []
+        self.model.eval()
+        with torch.no_grad():
+            for i, (batch_x, *_) in enumerate(test_loader):
+                if i >= n_batches:
+                    break
+                batch_x = batch_x.float().to(self.device)
+                # Reproduce the forward pre-processing to reach get_alpha_values
+                x = self.model.revin(batch_x, 'norm')
+                if self.model.use_decomp:
+                    seasonal, trend = self.model.decomp(x)
+                else:
+                    seasonal = trend = x
+                _, alpha = self.model.backbone.get_alpha_values(
+                    seasonal.permute(0, 2, 1),
+                    trend.permute(0, 2, 1),
+                )                                           # alpha: [B, C, 1]
+                all_alphas.append(alpha.squeeze(-1).mean(dim=0).cpu())
+        return torch.stack(all_alphas).mean(dim=0)         # [C]
