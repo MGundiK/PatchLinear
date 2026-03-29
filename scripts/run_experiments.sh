@@ -95,7 +95,8 @@ declare -a DATASETS=(
 run_ili() {
   local seed=$1
   local tag_suffix=$2
-  local extra_flags=("${@:3}")
+  local extra_flags=()
+  if [ $# -ge 3 ]; then extra_flags=("${@:3}"); fi
 
   for pred_len in 24 36 48 60; do
     local tag="ILI_pl${pred_len}${tag_suffix}"
@@ -128,7 +129,7 @@ run_ili() {
       --patience "${PATIENCE}" \
       --seed "${seed}" \
       --des Exp \
-      "${extra_flags[@]}"
+      "${extra_flags[@]+"${extra_flags[@]}"}"
   done
 }
 
