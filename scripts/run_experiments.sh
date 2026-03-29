@@ -118,6 +118,9 @@ run_ili() {
       --stride 3 \
       --dw_kernel 3 \
       --alpha "${ALPHA}" \
+      --use_decomp 0 \
+      --use_seas_stream 0 \
+      --use_fusion_gate 0 \
       --batch_size 32 \
       --learning_rate 0.01 \
       --lradj type3 \
