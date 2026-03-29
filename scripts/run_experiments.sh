@@ -21,10 +21,13 @@ cd "$SCRIPT_DIR"
 # ── Parse flags ───────────────────────────────────────────────────────────────
 RUN_ABLATIONS=0
 MULTI_SEED=0
+# REPLACE WITH:
+RUN_FULL=1
 for arg in "$@"; do
   case $arg in
-    --ablations) RUN_ABLATIONS=1 ;;
-    --seeds)     MULTI_SEED=1    ;;
+    --ablations)      RUN_ABLATIONS=1 ;;
+    --ablations-only) RUN_ABLATIONS=1; RUN_FULL=0 ;;
+    --seeds)          MULTI_SEED=1    ;;
   esac
 done
 
