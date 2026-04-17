@@ -1,82 +1,42 @@
 """
-PatchLinear: a lightweight long-term multivariate time series forecasting model.
+PatchLinear — imputation-capable model.
 
-Combines:
-  XLinear  -- Linear(seq_len, d_model) global temporal filter bank,
-              global token + TGM/VGM cross-channel mechanism,
-              sigmoid gating throughout.
-  xPatch   -- EMA seasonal-trend decomposition,
-              patching + depthwise-separable CNN for the seasonal stream,
-              arctangent loss (in exp_main).
-  ModernTCN -- large-kernel depthwise convolution along the patch axis (A6),
-               structural reparameterisation (optional),
-               pointwise ConvFFN for cross-feature mixing.
+Adds task_name flag:
+  'long_term_forecast'  (default) — pred_len output, same as before
+  'imputation'          — seq_len output, reconstruction head
 
-Ablation switches  (all bool, all exposed as CLI args in run.py)
------------------------------------------------------------------
-A1  use_decomp         True / False   -- EMA decomposition
-A2a use_seas_stream    False          -- trend-only (disable seasonal CNN)
-A2b use_trend_stream   False          -- seasonal-only (disable linear proj)
-A3  use_fusion_gate    True / False   -- input-dependent stream fusion
-A4a use_cross_channel  True / False   -- VGM cross-channel interaction
-A4b use_alpha_gate     True / False   -- per-channel mixing coefficient
-A6  dw_kernel          3 / 7 / 13    -- DWConv kernel size (ERF control)
+The backbone is identical for both tasks. Only the head and forward
+pass differ. This keeps the imputation model directly comparable to
+the forecasting model in ablation studies.
+
+Imputation forward pass:
+  1. Apply mask to input  (done outside the model, in exp_imputation)
+  2. RevIN normalise the ORIGINAL unmasked input statistics
+  3. Run backbone on masked input
+  4. Reconstruction head outputs [B, seq_len, C]
+  5. RevIN denormalise
+  6. Loss computed only on masked positions in exp_imputation
 """
 
 import torch
 import torch.nn as nn
 
-from layers.revin       import RevIN
-from layers.ema         import EMADecomp
-from layers.backbone    import Backbone
+from layers.revin    import RevIN
+from layers.ema      import EMADecomp
+from layers.backbone import Backbone
 
 
 class Model(nn.Module):
-    """
-    Top-level PatchLinear model.
-
-    The class is named Model (not PatchLinear) so it is compatible with the
-    standard Time Series Library convention of importing Model from each
-    model module.  The module file is named PatchLinear.py and the model is
-    registered in exp_main as 'PatchLinear'.
-
-    Required configs attributes
-    ---------------------------
-    seq_len           int     lookback window L (e.g. 96)
-    pred_len          int     forecast horizon  (96 / 192 / 336 / 720)
-    enc_in            int     number of input channels C
-    d_model           int     embedding dimension (64 or 128)
-    t_ff              int     TGM hidden dim (2 * d_model recommended)
-    c_ff              int     VGM hidden dim (max(16, min(C // 4, 128)))
-    patch_len         int     patch length                    (16)
-    stride            int     patch stride                    (8)
-    dw_kernel         int     DWConv kernel over patch axis   (3 / 7 / 13)
-    small_kernel      int     small branch for reparameterisation (3)
-    alpha             float   EMA smoothing factor            (0.3)
-    t_dropout         float
-    c_dropout         float
-    embed_dropout     float
-    head_dropout      float
-    use_reparam       bool    structural reparameterisation
-    use_decomp        bool    A1
-    use_trend_stream  bool    A2b  (default True)
-    use_seas_stream   bool    A2a  (default True)
-    use_fusion_gate   bool    A3
-    use_cross_channel bool    A4a
-    use_alpha_gate    bool    A4b
-    """
     def __init__(self, configs):
         super().__init__()
+        self.task_name = getattr(configs, 'task_name', 'long_term_forecast')
+        self.seq_len   = configs.seq_len
 
-        # ── Normalisation ──────────────────────────────────────────────────────
-        self.revin = RevIN(configs.enc_in, affine=True, subtract_last=False)
-
-        # ── EMA decomposition (A1) ─────────────────────────────────────────────
+        self.revin      = RevIN(configs.enc_in, affine=True, subtract_last=False)
         self.use_decomp = configs.use_decomp
         if self.use_decomp:
             self.decomp = EMADecomp(alpha=configs.alpha)
 
-        # ── Backbone ───────────────────────────────────────────────────────────
         self.backbone = Backbone(
             seq_len           = configs.seq_len,
             d_model           = configs.d_model,
@@ -98,48 +58,51 @@ class Model(nn.Module):
             use_alpha_gate    = configs.use_alpha_gate,
         )
 
-        # ── Prediction head (channel-independent linear map) ───────────────────
-        self.head = nn.Sequential(
-            nn.Dropout(configs.head_dropout),
-            nn.Linear(2 * configs.d_model, configs.pred_len),
-        )
+        # Forecasting head: [B, C, 2d] -> [B, C, pred_len]
+        if self.task_name == 'long_term_forecast':
+            self.head = nn.Sequential(
+                nn.Dropout(configs.head_dropout),
+                nn.Linear(2 * configs.d_model, configs.pred_len),
+            )
+        # Imputation head: [B, C, 2d] -> [B, C, seq_len]
+        elif self.task_name == 'imputation':
+            self.head = nn.Sequential(
+                nn.Dropout(configs.head_dropout),
+                nn.Linear(2 * configs.d_model, configs.seq_len),
+            )
+        else:
+            raise ValueError(f"Unknown task_name: {self.task_name}")
 
-    def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None):
+    def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None,
+                mask=None):
         """
         Parameters
         ----------
-        x_enc : [B, L, C]   lookback window (required)
-        other args are accepted for compatibility with TSLib data loaders
-        but are not used.
+        x_enc    : [B, L, C]  — for imputation this is the MASKED input
+                                (masked positions set to 0)
+        mask     : [B, L, C]  — 1 = observed, 0 = masked (imputation only,
+                                not used inside the model but accepted for
+                                API compatibility with exp_imputation)
 
         Returns
         -------
-        [B, pred_len, C]
+        [B, L, C]  for imputation   (L = seq_len)
+        [B, H, C]  for forecasting  (H = pred_len)
         """
-        # Normalise
-        x = self.revin(x_enc, 'norm')                      # [B, L, C]
+        # Normalise using statistics of the (possibly masked) input
+        x = self.revin(x_enc, 'norm')
 
-        # Decompose
         if self.use_decomp:
-            seasonal, trend = self.decomp(x)               # [B, L, C] each
+            seasonal, trend = self.decomp(x)
         else:
             seasonal = trend = x
 
-        # Backbone expects [B, C, L]
         out  = self.backbone(
             seasonal.permute(0, 2, 1),
             trend.permute(0, 2, 1),
-        )                                                   # [B, C, 2*d_model]
-
-        # Predict and permute back
-        pred = self.head(out).permute(0, 2, 1)             # [B, pred_len, C]
-
-        # Denormalise
+        )                                        # [B, C, 2d]
+        pred = self.head(out).permute(0, 2, 1)  # [B, L or H, C]
         return self.revin(pred, 'denorm')
 
-    def structural_reparam(self) -> None:
-        """
-        Fuse reparameterised training branches for fast inference.
-        Call once after training is complete.
-        """
+    def structural_reparam(self):
         self.backbone.merge_kernel()
