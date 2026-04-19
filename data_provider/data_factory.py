@@ -1,5 +1,5 @@
 from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Solar, Dataset_Pred
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
@@ -48,6 +48,9 @@ def data_provider(args, flag):
         train_only=train_only
     )
     print(flag, len(data_set))
+    if flag == 'train' and hasattr(args, 'few_shot_ratio') and args.few_shot_ratio < 1.0:
+    n = max(1, int(len(data_set) * args.few_shot_ratio))
+    data_set = Subset(data_set, range(n))
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
