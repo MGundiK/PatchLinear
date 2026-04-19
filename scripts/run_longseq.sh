@@ -27,7 +27,7 @@ run_one() {
 }
 
 # ── ETTh1 ──────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "ETTh1_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -43,7 +43,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── ETTh2 ──────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "ETTh2_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -59,7 +59,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── ETTm1 ──────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "ETTm1_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -75,7 +75,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── ETTm2 ──────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "ETTm2_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -91,7 +91,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── Weather ────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "Weather_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -107,7 +107,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── Traffic ────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "Traffic_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -123,7 +123,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── Electricity ────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "Elec_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -139,7 +139,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── Exchange ────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "Exchange_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
@@ -155,7 +155,7 @@ for L in 96 192 336 512 720; do
 done
 
 # ── Solar ──────────────────────────────────────────────────────────────────
-for L in 96 192 336 512 720; do
+for L in 192 336 512 720; do
   for PL in 96 192 336 720; do
     run_one "Solar_L${L}_pl${PL}" \
       --is_training 1 --root_path ./dataset/ \
