@@ -35,6 +35,7 @@ train_one() {
     --batch_size 2048 --learning_rate "${LR}" \
     --lradj sigmoid --train_epochs 100 --patience 10 \
     --model PatchLinear --seed "${SEED}" --des Exp \
+    --keep_checkpoint \
     --model_id "ZS_${SRC}_pl${PL}" > "$LOG" 2>&1
   grep "mse:\|best model" "$LOG" | tail -1 || true
 }
