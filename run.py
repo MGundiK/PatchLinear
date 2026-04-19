@@ -20,6 +20,8 @@ parser.add_argument('--train_only', type=bool, default=False,
                     help='train on full data without validation/test split')
 parser.add_argument('--keep_checkpoint', action='store_true', default=False,
     help='Keep checkpoint file after training (needed for zero-shot eval)')
+parser.add_argument('--few_shot_ratio', type=float, default=1.0,
+    help='Fraction of training timesteps to use (e.g. 0.1 = 10% few-shot)')
 
 # ── data ──────────────────────────────────────────────────────────────────────
 parser.add_argument("--data",       type=str, default="ETTh1")
