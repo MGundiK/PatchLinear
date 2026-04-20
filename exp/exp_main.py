@@ -92,6 +92,43 @@ class Exp_Main(Exp_Basic):
         bn_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.SyncBatchNorm)
         return any(isinstance(m, bn_types) for m in module.modules())
 
+    def _update_bn(self, loader, model):
+        """Drop-in replacement for torch.optim.swa_utils.update_bn that
+        respects our loader's tuple format and float casting.
+
+        The stock update_bn passes batch[0] straight to the model without
+        calling .float(), which breaks when the dataloader emits float64.
+        This version matches the dtype/device handling of our train loop.
+        """
+        bn_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.SyncBatchNorm)
+        momenta = {}
+        for m in model.modules():
+            if isinstance(m, bn_types):
+                m.reset_running_stats()
+                momenta[m] = m.momentum
+        if not momenta:
+            return  # no BN layers; nothing to update
+
+        was_training = model.training
+        model.train()
+        n = 0
+        with torch.no_grad():
+            for batch in loader:
+                batch_x = batch[0] if isinstance(batch, (list, tuple)) else batch
+                batch_x = batch_x.float().to(self.device)
+                b = batch_x.size(0)
+                # Running-mean momentum weighted by batch size across the loader.
+                momentum = b / float(n + b)
+                for m in momenta:
+                    m.momentum = momentum
+                model(batch_x)
+                n += b
+
+        # Restore the original momentum values
+        for m, mom in momenta.items():
+            m.momentum = mom
+        model.train(was_training)
+
     def _save_history(self, history, path):
         csv_path = os.path.join(path, 'history.csv')
         keys = list(history.keys())
@@ -341,9 +378,7 @@ class Exp_Main(Exp_Basic):
             # For models without BN this is a no-op; skip to save time.
             if self._has_batchnorm(swa_model):
                 print("[SWA] updating BN running statistics...")
-                torch.optim.swa_utils.update_bn(
-                    train_loader, swa_model, device=self.device
-                )
+                self._update_bn(train_loader, swa_model)
             else:
                 print("[SWA] no BatchNorm layers detected; skipping update_bn.")
 
