@@ -81,8 +81,27 @@ parser.add_argument("--patience",      type=int,   default=10)
 parser.add_argument("--learning_rate", type=float, default=0.0001)
 parser.add_argument("--des",           type=str,   default="Exp")
 parser.add_argument("--loss",          type=str,   default="mae")
-parser.add_argument("--lradj",         type=str,   default="sigmoid")
+parser.add_argument("--lradj",         type=str,   default="sigmoid",
+    help="LR schedule: type1 | type2 | type3 | sigmoid | constant | 3..6 | cosine_warm")
 parser.add_argument("--use_amp",       action="store_true", default=False)
+
+# ── SWA (Stochastic Weight Averaging) ─────────────────────────────────────────
+parser.add_argument("--use_swa",        action="store_true", default=False,
+                    help="Enable Stochastic Weight Averaging (Izmailov et al. 2018)")
+parser.add_argument("--swa_start_frac", type=float, default=0.75,
+                    help="Fraction of train_epochs at which SWA begins (default 0.75)")
+parser.add_argument("--swa_lr",         type=float, default=None,
+                    help="Flat LR during SWA phase (default: 0.05 * learning_rate)")
+parser.add_argument("--swa_anneal_epochs", type=int, default=1,
+                    help="Epochs to anneal from current LR to swa_lr at SWA start")
+
+# ── cosine warm restarts (used when --lradj cosine_warm) ──────────────────────
+parser.add_argument("--cosine_T_0",     type=int,   default=5,
+                    help="Epochs in the first cosine cycle")
+parser.add_argument("--cosine_T_mult",  type=int,   default=2,
+                    help="Cycle length multiplier after each restart")
+parser.add_argument("--cosine_eta_min", type=float, default=1e-6,
+                    help="Minimum LR at end of each cosine cycle")
 
 # ── GPU ───────────────────────────────────────────────────────────────────────
 parser.add_argument("--use_gpu",       type=bool, default=True)
@@ -118,27 +137,10 @@ print("Args:", args)
 from exp.exp_main import Exp_Main
 Exp = Exp_Main
 
-if args.is_training:
-    for ii in range(args.itr):
-        setting = (
-            f"{args.model_id}_{args.model}_{args.data}_"
-            f"ft{args.features}_sl{args.seq_len}_pl{args.pred_len}_"
-            f"d{args.d_model}_dk{args.dw_kernel}_"
-            f"dec{int(args.use_decomp)}_"
-            f"ts{int(args.use_trend_stream)}_ss{int(args.use_seas_stream)}_"
-            f"fg{int(args.use_fusion_gate)}_"
-            f"cc{int(args.use_cross_channel)}_ag{int(args.use_alpha_gate)}_"
-            f"{args.des}_{ii}"
-        )
-        exp = Exp(args)
-        print(f">>>>>>>start training: {setting}")
-        exp.train(setting)
-        print(f">>>>>>>testing: {setting}")
-        exp.test(setting)
-        torch.cuda.empty_cache()
-else:
-    ii = 0
-    setting = (
+
+def _build_setting(args, ii):
+    """Build run identifier; append suffixes so SWA/cosine runs don't collide."""
+    base = (
         f"{args.model_id}_{args.model}_{args.data}_"
         f"ft{args.features}_sl{args.seq_len}_pl{args.pred_len}_"
         f"d{args.d_model}_dk{args.dw_kernel}_"
@@ -148,6 +150,26 @@ else:
         f"cc{int(args.use_cross_channel)}_ag{int(args.use_alpha_gate)}_"
         f"{args.des}_{ii}"
     )
+    suffix = ""
+    if args.lradj == 'cosine_warm':
+        suffix += "_cos"
+    if args.use_swa:
+        suffix += "_swa"
+    return base + suffix
+
+
+if args.is_training:
+    for ii in range(args.itr):
+        setting = _build_setting(args, ii)
+        exp = Exp(args)
+        print(f">>>>>>>start training: {setting}")
+        exp.train(setting)
+        print(f">>>>>>>testing: {setting}")
+        exp.test(setting)
+        torch.cuda.empty_cache()
+else:
+    ii = 0
+    setting = _build_setting(args, ii)
     exp = Exp(args)
     print(f">>>>>>>testing: {setting}")
     exp.test(setting, test=1)
