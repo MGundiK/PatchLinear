@@ -32,7 +32,7 @@ class Exp_Main(Exp_Basic):
         model_dict = {
             'PatchLinear': PatchLinear,
         }
-        
+
         if self.args.model not in model_dict:
             raise ValueError(
                 f"Unknown model '{self.args.model}'. "
@@ -52,7 +52,16 @@ class Exp_Main(Exp_Basic):
         return optim.AdamW(self.model.parameters(), lr=self.args.learning_rate)
 
     def _select_criterion(self):
-        return nn.MSELoss(), nn.L1Loss()
+        """Return (mse_loss, mae_loss, huber_loss) reduction='mean' modules.
+
+        Huber uses args.huber_delta if present; otherwise 1.0.
+        """
+        huber_delta = getattr(self.args, 'huber_delta', 1.0)
+        # SmoothL1Loss with beta=huber_delta behaves as a Huber loss with
+        # delta=huber_delta when reduction='mean' (PyTorch uses beta/2 inside
+        # the quadratic region, which matches textbook Huber to a constant).
+        huber = nn.SmoothL1Loss(beta=huber_delta)
+        return nn.MSELoss(), nn.L1Loss(), huber
 
     def _arctan_ratio(self, pred_len, device):
         # Arctangent loss weight schedule from xPatch.
@@ -62,6 +71,24 @@ class Exp_Main(Exp_Basic):
             [-math.atan(i + 1) + math.pi / 4 + 1 for i in range(pred_len)]
         )
         return torch.tensor(ratio).unsqueeze(-1).to(device)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Training-loss dispatch.
+    # Kept as a pure function of (outputs, batch_y, ratio, criterions)
+    # so it's trivial to swap and easy to unit-test if needed.
+    # ─────────────────────────────────────────────────────────────────
+    def _compute_train_loss(self, outputs, batch_y, ratio,
+                            mse_criterion, mae_criterion, huber_criterion):
+        kind = getattr(self.args, 'train_loss', 'wmae')
+        if kind == 'wmae':
+            return mae_criterion(outputs * ratio, batch_y * ratio)
+        if kind == 'mae':
+            return mae_criterion(outputs, batch_y)
+        if kind == 'mse':
+            return mse_criterion(outputs, batch_y)
+        if kind == 'huber':
+            return huber_criterion(outputs, batch_y)
+        raise ValueError(f"Unknown train_loss: {kind}")
 
     def vali(self, vali_loader, criterion, use_loss_weight=False):
         total_loss = []
@@ -93,7 +120,15 @@ class Exp_Main(Exp_Basic):
         train_steps    = len(train_loader)
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
         model_optim    = self._select_optimizer()
-        mse_criterion, mae_criterion = self._select_criterion()
+        mse_criterion, mae_criterion, huber_criterion = self._select_criterion()
+
+        train_loss_kind    = getattr(self.args, 'train_loss',        'wmae')
+        early_stop_metric  = getattr(self.args, 'early_stop_metric', 'wmae')
+        print(
+            f"[loss] train={train_loss_kind}  "
+            f"early_stop_metric={early_stop_metric}  "
+            f"huber_delta={getattr(self.args, 'huber_delta', 1.0)}"
+        )
 
         for epoch in range(self.args.train_epochs):
             train_loss  = []
@@ -112,7 +147,10 @@ class Exp_Main(Exp_Basic):
                 outputs = outputs[:, -self.args.pred_len:, f_dim:]
                 batch_y = batch_y[:, -self.args.pred_len:, f_dim:]
                 ratio   = self._arctan_ratio(self.args.pred_len, self.device)
-                loss    = mae_criterion(outputs * ratio, batch_y * ratio)
+                loss    = self._compute_train_loss(
+                    outputs, batch_y, ratio,
+                    mse_criterion, mae_criterion, huber_criterion,
+                )
                 train_loss.append(loss.item())
                 loss.backward()
                 model_optim.step()
@@ -129,19 +167,30 @@ class Exp_Main(Exp_Basic):
                     time_now   = time.time()
 
             train_loss = np.mean(train_loss)
-            # Validation: weighted MAE matching training objective
-            # Test:       plain MSE matching benchmark protocol
-            vali_loss  = self.vali(vali_loader, mae_criterion, use_loss_weight=True)
-            test_loss  = self.vali(test_loader,  mse_criterion, use_loss_weight=False)
+
+            # Compute all three vali signals every epoch so the post-hoc
+            # drift analysis has all candidates available regardless of
+            # which one is driving early stopping.
+            vali_wmae = self.vali(vali_loader, mae_criterion, use_loss_weight=True)
+            vali_mae  = self.vali(vali_loader, mae_criterion, use_loss_weight=False)
+            vali_mse  = self.vali(vali_loader, mse_criterion, use_loss_weight=False)
+            test_mse  = self.vali(test_loader,  mse_criterion, use_loss_weight=False)
+
+            # Pick the signal that EarlyStopping will see
+            es_signal = {
+                'wmae': vali_wmae, 'mae': vali_mae, 'mse': vali_mse,
+            }[early_stop_metric]
 
             print(
                 f"Epoch {epoch+1} | "
                 f"time: {time.time()-epoch_start:.1f}s | "
-                f"train: {train_loss:.6f} | "
-                f"vali(wMAE): {vali_loss:.6f} | "
-                f"test(MSE): {test_loss:.6f}"
+                f"train({train_loss_kind}): {train_loss:.6f} | "
+                f"vali(wMAE): {vali_wmae:.6f} | vali(MAE): {vali_mae:.6f} | "
+                f"vali(MSE): {vali_mse:.6f} | test(MSE): {test_mse:.6f} | "
+                f"ES({early_stop_metric}): {es_signal:.6f}"
             )
-            early_stopping(vali_loss, self.model, path)
+
+            early_stopping(es_signal, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
