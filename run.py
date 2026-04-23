@@ -84,6 +84,23 @@ parser.add_argument("--loss",          type=str,   default="mae")
 parser.add_argument("--lradj",         type=str,   default="sigmoid")
 parser.add_argument("--use_amp",       action="store_true", default=False)
 
+# ── training objective & early-stopping signal ────────────────────────────────
+# train_loss: what the optimizer backprops through.
+#   wmae  - weighted MAE (arctan ratio), matches previous default behavior
+#   mae   - unweighted MAE
+#   mse   - unweighted MSE
+#   huber - Huber/SmoothL1 loss with delta=--huber_delta (unweighted)
+# early_stop_metric: which vali metric drives early stopping & best checkpoint.
+#   wmae / mae / mse
+parser.add_argument("--train_loss", type=str, default="wmae",
+                    choices=["wmae", "mae", "mse", "huber"],
+                    help="Training objective (default wmae = previous behavior)")
+parser.add_argument("--early_stop_metric", type=str, default="wmae",
+                    choices=["wmae", "mae", "mse"],
+                    help="Vali metric for early stopping & checkpoint selection")
+parser.add_argument("--huber_delta", type=float, default=1.0,
+                    help="Huber/SmoothL1 delta (only used when train_loss=huber)")
+
 # ── GPU ───────────────────────────────────────────────────────────────────────
 parser.add_argument("--use_gpu",       type=bool, default=True)
 parser.add_argument("--gpu",           type=int,  default=0)
