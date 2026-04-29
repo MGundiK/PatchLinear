@@ -70,29 +70,29 @@ PHASE1_L=(512 720)
 PHASE1_K=(7 13 19)
 SEED=2021
 
-for PL in "${PHASE1_HORIZONS[@]}"; do
-  for D in "${PHASE1_D[@]}"; do
-    # Scale t_ff with d_model (2x convention)
-    TFF=$((D * 2))
-    for L in "${PHASE1_L[@]}"; do
-      for K in "${PHASE1_K[@]}"; do
-        DES="ETThSweep_d${D}_L${L}_k${K}"
-        TAG="ETTh1_pl${PL}_${DES}_s${SEED}"
-        MID="ETTh1_pl${PL}_${DES}"
-        run_one "$TAG" \
-          --seed "$SEED" \
-          --model_id "$MID" \
-          --des "$DES" \
-          $ETTH1_COMMON \
-          --pred_len "$PL" \
-          --seq_len "$L" \
-          --d_model "$D" \
-          --t_ff "$TFF" \
-          --dw_kernel "$K"
-      done
-    done
-  done
-done
+#for PL in "${PHASE1_HORIZONS[@]}"; do
+#  for D in "${PHASE1_D[@]}"; do
+#    # Scale t_ff with d_model (2x convention)
+#    TFF=$((D * 2))
+#    for L in "${PHASE1_L[@]}"; do
+#      for K in "${PHASE1_K[@]}"; do
+#        DES="ETThSweep_d${D}_L${L}_k${K}"
+#        TAG="ETTh1_pl${PL}_${DES}_s${SEED}"
+#        MID="ETTh1_pl${PL}_${DES}"
+#        run_one "$TAG" \
+#          --seed "$SEED" \
+#          --model_id "$MID" \
+#          --des "$DES" \
+#          $ETTH1_COMMON \
+#          --pred_len "$PL" \
+#          --seq_len "$L" \
+#          --d_model "$D" \
+#          --t_ff "$TFF" \
+#          --dw_kernel "$K"
+#      done
+#    done
+#  done
+#done
 
 # ── Phase 1 summary ────────────────────────────────────────────────────────
 #echo ""
