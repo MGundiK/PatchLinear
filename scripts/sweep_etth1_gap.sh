@@ -95,21 +95,130 @@ for PL in "${PHASE1_HORIZONS[@]}"; do
 done
 
 # ── Phase 1 summary ────────────────────────────────────────────────────────
+#echo ""
+#echo "================================================================"
+#echo "  PHASE 1 SUMMARY"
+#echo "================================================================"
+
+#python3 - <<'PY'
+#import re, os
+
+# Reference numbers from HANDOVER_RESULTS §1.1 (3-seed) and xPatch Table 14
+#REF = {
+#    336: {"PL_3seed": 0.442, "xPatch": 0.391, "gap": +0.051},
+#    720: {"PL_3seed": 0.490, "xPatch": 0.442, "gap": +0.048},
+#}
+
+# Match scouting rows
+#pat_set = re.compile(
+#    r'^ETTh1_pl(?P<pl>\d+)_(?P<des>ETThSweep_d\d+_L\d+_k\d+)'
+#    r'_PatchLinear_.+_(?P=des)_\d+$'
+#)
+#pat_des = re.compile(r'ETThSweep_d(?P<d>\d+)_L(?P<L>\d+)_k(?P<k>\d+)')
+#pat_met = re.compile(r'mse:([\d.]+),\s*mae:([\d.]+)')
+
+#if not os.path.exists('result.txt'):
+#    print("No result.txt yet.")
+#    raise SystemExit(0)
+
+#rows = []
+#with open('result.txt') as f:
+#    lines = [ln.strip() for ln in f if ln.strip()]
+
+#i = 0
+#while i < len(lines) - 1:
+#    m = pat_set.match(lines[i])
+#    if m:
+#        mm = pat_met.search(lines[i+1])
+#        if mm:
+#            dm = pat_des.match(m.group('des'))
+#            if dm:
+#                rows.append((
+#                    int(m.group('pl')),
+#                    int(dm.group('d')),
+#                    int(dm.group('L')),
+#                    int(dm.group('k')),
+#                    float(mm.group(1)),
+#                    float(mm.group(2)),
+#                ))
+#    i += 1
+
+# Keep last occurrence per (pl, d, L, k)
+#last = {}
+#for pl, d, L, k, mse, mae in rows:
+#    last[(pl, d, L, k)] = (mse, mae)
+
+#if not last:
+#    print("No ETTh1 sweep rows found yet.")
+#    raise SystemExit(0)
+
+#for pl in [336, 720]:
+#    print(f"\nETTh1 H={pl}  (PL paper 3-seed: {REF[pl]['PL_3seed']:.3f}  |  xPatch: {REF[pl]['xPatch']:.3f}  |  gap: +{REF[pl]['gap']:.3f})")
+#    print(f"  {'config':<22}  {'MSE':>9}  {'MAE':>9}  {'Δ vs paper':>12}")
+#    print("  " + "-" * 60)
+#    rows_at_pl = [(d, L, k, mse, mae) for (p, d, L, k), (mse, mae) in last.items() if p == pl]
+#    rows_at_pl.sort(key=lambda r: r[3])  # sort by MSE
+#    for d, L, k, mse, mae in rows_at_pl:
+#        delta = (mse - REF[pl]['PL_3seed']) / REF[pl]['PL_3seed'] * 100
+#        marker = "  ✓ improves" if mse < REF[pl]['PL_3seed'] else ""
+#        marker += "  ✓ beats xPatch" if mse < REF[pl]['xPatch'] else ""
+#        print(f"  d={d:<3} L={L:<3} k={k:<3}     {mse:>9.6f}  {mae:>9.6f}  {delta:>+11.1f}%{marker}")
+
+#print()
+#print("="*70)
+#print("  PHASE 2 RECOMMENDATION")
+#print("="*70)
+#print("  Pick 2 best configs per horizon (lowest MSE).")
+#print("  Run Phase 2 with --seeds 2022, 2023 to confirm 3-seed.")
+#print("  Manual: copy the winning (d, L, k) into the Phase 2 block below")
+#print("          (currently commented out) and uncomment.")
+#PY
+
+# ── Phase 2: 3-seed confirmation on H=336 winners ──────────────────────────
 echo ""
 echo "================================================================"
-echo "  PHASE 1 SUMMARY"
+echo "  PHASE 2: 3-seed confirmation on H=336 top-2 configs"
+echo "================================================================"
+
+PHASE2_CONFIGS=(
+  # H=336 winners from Phase 1 (only confirming H=336; H=720 didn't improve)
+  "336 128 512 7"    # Phase 1: 0.404 (-8.7% vs paper)
+  "336 128 512 13"   # Phase 1: 0.410 (-7.2% vs paper)
+)
+PHASE2_SEEDS=(2022 2023)
+
+for cfg in "${PHASE2_CONFIGS[@]}"; do
+  read PL D L K <<< "$cfg"
+  TFF=$((D * 2))
+  for SEED in "${PHASE2_SEEDS[@]}"; do
+    DES="ETThSweep_d${D}_L${L}_k${K}"
+    TAG="ETTh1_pl${PL}_${DES}_s${SEED}"
+    MID="ETTh1_pl${PL}_${DES}"
+    run_one "$TAG" \
+      --seed "$SEED" \
+      --model_id "$MID" \
+      --des "$DES" \
+      $ETTH1_COMMON \
+      --pred_len "$PL" \
+      --seq_len "$L" \
+      --d_model "$D" \
+      --t_ff "$TFF" \
+      --dw_kernel "$K"
+  done
+done
+
+# ── Phase 2 summary: 3-seed means with comparison to paper ─────────────────
+echo ""
+echo "================================================================"
+echo "  PHASE 2 SUMMARY: 3-seed means"
 echo "================================================================"
 
 python3 - <<'PY'
-import re, os
+import re, os, statistics
 
-# Reference numbers from HANDOVER_RESULTS §1.1 (3-seed) and xPatch Table 14
-REF = {
-    336: {"PL_3seed": 0.442, "xPatch": 0.391, "gap": +0.051},
-    720: {"PL_3seed": 0.490, "xPatch": 0.442, "gap": +0.048},
-}
+# Paper d=64, L=96, k=7 reference (3-seed)
+PAPER = {336: {"mse": 0.442, "mae": 0.424}}
 
-# Match scouting rows
 pat_set = re.compile(
     r'^ETTh1_pl(?P<pl>\d+)_(?P<des>ETThSweep_d\d+_L\d+_k\d+)'
     r'_PatchLinear_.+_(?P=des)_\d+$'
@@ -121,10 +230,13 @@ if not os.path.exists('result.txt'):
     print("No result.txt yet.")
     raise SystemExit(0)
 
+# Collect all rows; we'll need per-seed values to compute 3-seed means
+# but the setting line doesn't include seed (it was in --seed only).
+# Use line-order: assume model_id structure includes seed elsewhere or
+# just rely on counting unique results per (pl, d, L, k).
 rows = []
 with open('result.txt') as f:
     lines = [ln.strip() for ln in f if ln.strip()]
-
 i = 0
 while i < len(lines) - 1:
     m = pat_set.match(lines[i])
@@ -143,60 +255,60 @@ while i < len(lines) - 1:
                 ))
     i += 1
 
-# Keep last occurrence per (pl, d, L, k)
-last = {}
+# Group by (pl, d, L, k) — this collects all seeds for that config
+from collections import defaultdict
+groups = defaultdict(list)
 for pl, d, L, k, mse, mae in rows:
-    last[(pl, d, L, k)] = (mse, mae)
+    groups[(pl, d, L, k)].append((mse, mae))
 
-if not last:
-    print("No ETTh1 sweep rows found yet.")
-    raise SystemExit(0)
+# Show H=336 configs that have ≥2 runs (i.e., went through Phase 2)
+print(f"\nH=336 results (paper 3-seed: MSE={PAPER[336]['mse']:.3f}, "
+      f"MAE={PAPER[336]['mae']:.3f}, xPatch: 0.391/0.415):")
+print(f"  {'config':<22}  {'n':>2}  {'MSE mean':>9}  {'std':>8}  "
+      f"{'MAE mean':>9}  {'Δ MSE':>7}  status")
+print("  " + "-" * 90)
 
-for pl in [336, 720]:
-    print(f"\nETTh1 H={pl}  (PL paper 3-seed: {REF[pl]['PL_3seed']:.3f}  |  xPatch: {REF[pl]['xPatch']:.3f}  |  gap: +{REF[pl]['gap']:.3f})")
-    print(f"  {'config':<22}  {'MSE':>9}  {'MAE':>9}  {'Δ vs paper':>12}")
-    print("  " + "-" * 60)
-    rows_at_pl = [(d, L, k, mse, mae) for (p, d, L, k), (mse, mae) in last.items() if p == pl]
-    rows_at_pl.sort(key=lambda r: r[3])  # sort by MSE
-    for d, L, k, mse, mae in rows_at_pl:
-        delta = (mse - REF[pl]['PL_3seed']) / REF[pl]['PL_3seed'] * 100
-        marker = "  ✓ improves" if mse < REF[pl]['PL_3seed'] else ""
-        marker += "  ✓ beats xPatch" if mse < REF[pl]['xPatch'] else ""
-        print(f"  d={d:<3} L={L:<3} k={k:<3}     {mse:>9.6f}  {mae:>9.6f}  {delta:>+11.1f}%{marker}")
+h336 = sorted(
+    [(d, L, k, vals) for (pl, d, L, k), vals in groups.items() if pl == 336],
+    key=lambda r: statistics.mean(v[0] for v in r[3])
+)
+for d, L, k, vals in h336:
+    n = len(vals)
+    mean_mse = statistics.mean(v[0] for v in vals)
+    mean_mae = statistics.mean(v[1] for v in vals)
+    std_mse = statistics.stdev(v[0] for v in vals) if n > 1 else 0
+    delta = (mean_mse - PAPER[336]['mse']) / PAPER[336]['mse'] * 100
+    status = ""
+    if mean_mse < PAPER[336]['mse']:
+        status = "improves"
+        if mean_mse < 0.391:
+            status = "BEATS xPatch"
+    else:
+        status = "no improvement"
+    print(f"  d={d:<3} L={L:<3} k={k:<3}        "
+          f"{n:>2}  {mean_mse:>9.6f}  ±{std_mse*100:>5.2f}%  "
+          f"{mean_mae:>9.6f}  {delta:>+6.1f}%  {status}")
 
+# Print decision
 print()
-print("="*70)
-print("  PHASE 2 RECOMMENDATION")
-print("="*70)
-print("  Pick 2 best configs per horizon (lowest MSE).")
-print("  Run Phase 2 with --seeds 2022, 2023 to confirm 3-seed.")
-print("  Manual: copy the winning (d, L, k) into the Phase 2 block below")
-print("          (currently commented out) and uncomment.")
+if h336:
+    best = h336[0]
+    bd, bL, bk, bvals = best
+    if len(bvals) >= 3:
+        bmean = statistics.mean(v[0] for v in bvals)
+        delta = (bmean - PAPER[336]['mse']) / PAPER[336]['mse'] * 100
+        print(f"  RECOMMENDATION:")
+        if delta < -3.0:
+            print(f"    Use d={bd}, L={bL}, k={bk} for ETTh1 H=336 in the paper.")
+            print(f"    3-seed mean MSE {bmean:.4f} (Δ {delta:+.1f}% vs paper).")
+            print(f"    This will likely reshuffle the ETTh1 Avg row in tables.tex.")
+        elif delta < -1.0:
+            print(f"    Marginal improvement ({delta:+.1f}%). Within seed noise.")
+            print(f"    Probably not worth updating the paper for.")
+        else:
+            print(f"    Single-seed Phase 1 win didn't hold up at 3 seeds.")
+            print(f"    Keep paper at d=64, L=96.")
 PY
-
-# ── Phase 2: 3-seed confirmation (MANUAL — uncomment after Phase 1) ────────
-# After Phase 1, uncomment and edit this block with the top 2 configs per
-# horizon from the summary above. Example:
-#
-# PHASE2_CONFIGS=(
-#   "336 128 720 13"   # H d L k
-#   "336 128 720 19"
-#   "720 128 720 13"
-#   "720 64  720 19"
-# )
-# PHASE2_SEEDS=(2022 2023)
-# for cfg in "${PHASE2_CONFIGS[@]}"; do
-#   read PL D L K <<< "$cfg"
-#   TFF=$((D * 2))
-#   for SEED in "${PHASE2_SEEDS[@]}"; do
-#     DES="ETThSweep_d${D}_L${L}_k${K}"
-#     TAG="ETTh1_pl${PL}_${DES}_s${SEED}"
-#     MID="ETTh1_pl${PL}_${DES}"
-#     run_one "$TAG" --seed "$SEED" --model_id "$MID" --des "$DES" \
-#       $ETTH1_COMMON --pred_len "$PL" --seq_len "$L" \
-#       --d_model "$D" --t_ff "$TFF" --dw_kernel "$K"
-#   done
-# done
 
 # ── Drive backup ────────────────────────────────────────────────────────────
 if [ -d "/content/drive/MyDrive" ]; then
