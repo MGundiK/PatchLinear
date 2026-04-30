@@ -56,10 +56,12 @@ parser.add_argument('--embed_dropout', type=float, default=0.1)
 parser.add_argument('--head_dropout',  type=float, default=0.0)
 
 # Ablation flags
-parser.add_argument('--use_decomp',        type=int, default=0)
-parser.add_argument('--use_trend_stream',  type=int, default=0)
+# Decomp + both streams + fusion ON: M4 has trend (esp. Yearly/Quarterly)
+# Cross-channel + alpha OFF: M4 is univariate (C=1), these do nothing
+parser.add_argument('--use_decomp',        type=int, default=1)
+parser.add_argument('--use_trend_stream',  type=int, default=1)
 parser.add_argument('--use_seas_stream',   type=int, default=1)
-parser.add_argument('--use_fusion_gate',   type=int, default=0)
+parser.add_argument('--use_fusion_gate',   type=int, default=1)
 parser.add_argument('--use_cross_channel', type=int, default=0)
 parser.add_argument('--use_alpha_gate',    type=int, default=0)
 parser.add_argument('--use_reparam',       type=int, default=0)
