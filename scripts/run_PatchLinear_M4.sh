@@ -5,7 +5,8 @@
 # All 6 freq CSVs accumulate in --forecast_dir; OWA is computed after each run.
 # =============================================================================
 set -e
-cd "$(dirname "${BASH_SOURCE[0]}")"
+# Always run from the repo root regardless of where the script is called from
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 model_name=PatchLinear
 d_model=64
