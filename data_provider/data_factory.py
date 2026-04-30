@@ -1,4 +1,4 @@
-from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Solar, Dataset_Pred
+from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Solar, Dataset_Pred, Dataset_M4, Dataset_PEMS
 from torch.utils.data import DataLoader, Subset
 
 data_dict = {
@@ -8,6 +8,8 @@ data_dict = {
     'ETTm2': Dataset_ETT_minute,
     'Solar': Dataset_Solar,
     'custom': Dataset_Custom,
+    'm4':   Dataset_M4,
+    'PEMS': Dataset_PEMS,
 }
 
 
