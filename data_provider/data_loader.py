@@ -436,7 +436,8 @@ class Dataset_M4(Dataset):
             training=(self.flag == 'train'), dataset_file=self.root_path)
         training_values = np.array(
             [v[~np.isnan(v)] for v in
-             dataset.values[dataset.groups == self.seasonal_patterns]])
+             dataset.values[dataset.groups == self.seasonal_patterns]],
+            dtype=object)
         self.ids        = dataset.ids[dataset.groups == self.seasonal_patterns]
         self.timeseries = list(training_values)
 
