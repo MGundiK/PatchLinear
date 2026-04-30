@@ -64,7 +64,7 @@ class M4Summary:
         grouped_owa = OrderedDict()
 
         naive2_forecasts = pd.read_csv(self.naive_path).values[:, 1:].astype(np.float32)
-        naive2_forecasts = np.array([v[~np.isnan(v)] for v in naive2_forecasts])
+        naive2_forecasts = np.array([v[~np.isnan(v)] for v in naive2_forecasts], dtype=object)
 
         model_mases = {}
         naive2_smapes = {}
