@@ -1,4 +1,7 @@
-from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom, Dataset_Solar, Dataset_Pred, Dataset_M4, Dataset_PEMS
+from data_provider.data_loader import (
+    Dataset_ETT_hour, Dataset_ETT_minute, Dataset_Custom,
+    Dataset_Solar, Dataset_Pred, Dataset_M4, Dataset_PEMS,
+)
 from torch.utils.data import DataLoader, Subset
 
 data_dict = {
@@ -8,55 +11,80 @@ data_dict = {
     'ETTm2': Dataset_ETT_minute,
     'Solar': Dataset_Solar,
     'custom': Dataset_Custom,
-    'm4':   Dataset_M4,
-    'PEMS': Dataset_PEMS,
+    'm4':    Dataset_M4,
+    'PEMS':  Dataset_PEMS,
 }
 
 
 def data_provider(args, flag):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != 'timeF' else 1
-    train_only = args.train_only
+    train_only = getattr(args, 'train_only', False)
 
+    # ── flag-level defaults ───────────────────────────────────────────────────
     if flag == 'test':
         shuffle_flag = False
-        drop_last = True
-        # drop_last = False # without the "drop-last" trick
-        batch_size = args.batch_size
-        freq = args.freq
+        drop_last    = False          # never drop on test
+        batch_size   = args.batch_size
+        freq         = args.freq
     elif flag == 'pred':
         shuffle_flag = False
-        drop_last = False
-        batch_size = 1
-        freq = args.freq
-        Data = Dataset_Pred
-    else:
+        drop_last    = False
+        batch_size   = 1
+        freq         = args.freq
+        Data         = Dataset_Pred
+    else:                             # train / val
         shuffle_flag = True
-        drop_last = True
-        batch_size = args.batch_size
-        freq = args.freq
-    # if flag == 'train':
-    #     drop_last = False
+        drop_last    = True
+        batch_size   = args.batch_size
+        freq         = args.freq
 
-    data_set = Data(
-        root_path=args.root_path,
-        data_path=args.data_path,
-        flag=flag,
-        size=[args.seq_len, args.label_len, args.pred_len],
-        features=args.features,
-        target=args.target,
-        timeenc=timeenc,
-        freq=freq,
-        train_only=train_only
-    )
+    # ── M4: variable-length series — never drop, pass seasonal_patterns ───────
+    if args.data == 'm4':
+        drop_last = False
+        data_set = Data(
+            root_path=args.root_path,
+            flag=flag,
+            size=[args.seq_len, args.label_len, args.pred_len],
+            seasonal_patterns=getattr(args, 'seasonal_patterns', 'Monthly'),
+        )
+
+    # ── PEMS: .npz file, no date column, no timeenc ───────────────────────────
+    elif args.data == 'PEMS':
+        data_set = Data(
+            root_path=args.root_path,
+            data_path=args.data_path,
+            flag=flag,
+            size=[args.seq_len, args.label_len, args.pred_len],
+            scale=True,
+        )
+
+    # ── everything else (ETT, custom, Solar, Pred) ────────────────────────────
+    else:
+        data_set = Data(
+            root_path=args.root_path,
+            data_path=args.data_path,
+            flag=flag,
+            size=[args.seq_len, args.label_len, args.pred_len],
+            features=args.features,
+            target=args.target,
+            timeenc=timeenc,
+            freq=freq,
+            train_only=train_only,
+        )
+
     print(flag, len(data_set))
-    if flag == 'train' and hasattr(args, 'few_shot_ratio') and args.few_shot_ratio < 1.0:
+
+    # ── few-shot: slice training set ─────────────────────────────────────────
+    if flag == 'train' and getattr(args, 'few_shot_ratio', 1.0) < 1.0:
         n = max(1, int(len(data_set) * args.few_shot_ratio))
         data_set = Subset(data_set, range(n))
+
     data_loader = DataLoader(
         data_set,
         batch_size=batch_size,
         shuffle=shuffle_flag,
         num_workers=args.num_workers,
-        drop_last=drop_last)
+        drop_last=drop_last,
+    )
     return data_set, data_loader
