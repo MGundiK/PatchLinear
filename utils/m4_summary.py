@@ -26,7 +26,7 @@ import os
 
 
 def group_values(values, groups, group_name):
-    return np.array([v[~np.isnan(v)] for v in values[groups == group_name]])
+    return np.array([v[~np.isnan(v)] for v in values[groups == group_name]], dtype=object)
 
 
 def mase(forecast, insample, outsample, frequency):
