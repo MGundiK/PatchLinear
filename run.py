@@ -32,6 +32,8 @@ parser.add_argument("--features",   type=str, default="M",
 parser.add_argument("--target",     type=str, default="OT")
 parser.add_argument("--freq",       type=str, default="h")
 parser.add_argument("--embed",      type=str, default="timeF")
+parser.add_argument('--seasonal_patterns', type=str, default='Monthly',
+                    help='M4 only: Yearly/Quarterly/Monthly/Weekly/Daily/Hourly')
 
 # ── forecasting ───────────────────────────────────────────────────────────────
 parser.add_argument("--seq_len",   type=int, default=96)
