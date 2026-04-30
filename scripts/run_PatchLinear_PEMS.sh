@@ -13,7 +13,7 @@
 #   - label_len=0: PEMS uses direct multi-step (no decoder warmup)
 # =============================================================================
 set -e
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 model_name=PatchLinear
 seq_len=96
