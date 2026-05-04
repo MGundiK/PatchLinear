@@ -25,7 +25,9 @@ def RMSE(pred, true):
 
 
 def MAPE(pred, true):
-    return np.mean(np.abs((pred - true) / true))
+    mape = np.abs((pred - true) / true)
+    mape = np.where(mape > 5, 0, mape)
+    return np.mean(mape)
 
 
 def MSPE(pred, true):
