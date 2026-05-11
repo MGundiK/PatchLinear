@@ -17,7 +17,7 @@ stride=4
 dw_kernel=3
 batch_size=16
 learning_rate=0.001
-train_epochs=30
+train_epochs=50
 patience=10
 seed=2021
 
