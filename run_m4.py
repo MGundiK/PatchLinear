@@ -144,13 +144,15 @@ else:
         file_path=args.forecast_dir + os.sep,
         root_path=args.root_path,
     )
-    smapes, owas, _, _ = summary.evaluate()
+    smapes, owas, mape, mase = summary.evaluate()
 
     print(f"\n{'Frequency':<14} {'SMAPE':>8} {'OWA':>8}")
     print("-" * 34)
     for key in ['Yearly', 'Quarterly', 'Monthly', 'Others', 'Average']:
         s = smapes.get(key, float('nan'))
         o = owas.get(key,   float('nan'))
+        mp = mape.get(key,   float('nan'))
+        ms = mase.get(key,   float('nan'))
         print(f"{key:<14} {s:>8.3f} {o:>8.3f}")
 
     results_path = 'logs/m4/results.txt'
@@ -162,5 +164,7 @@ else:
         for key in ['Yearly', 'Quarterly', 'Monthly', 'Others', 'Average']:
             s = smapes.get(key, float('nan'))
             o = owas.get(key,   float('nan'))
+            mp = mape.get(key,   float('nan'))
+            ms = mase.get(key,   float('nan'))
             f.write(f"{key:<14} {s:>8.3f} {o:>8.3f}\n")
     print(f"\nResults saved to {results_path}")
