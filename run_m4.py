@@ -146,7 +146,7 @@ else:
     )
     smapes, owas, mape, mase = summary.evaluate()
 
-    print(f"\n{'Frequency':<14} {'SMAPE':>8} {'OWA':>8}")
+    print(f"\n{'Frequency':<14} {'SMAPE':>8} {'OWA':>8} {'MAPE':>8} {'MASE':>8}")
     print("-" * 34)
     for key in ['Yearly', 'Quarterly', 'Monthly', 'Others', 'Average']:
         s = smapes.get(key, float('nan'))
@@ -160,7 +160,7 @@ else:
     with open(results_path, mode) as f:
         if mode == 'w':
             f.write(f"PatchLinear M4 Results (seed={args.seed})\n")
-            f.write(f"{'Frequency':<14} {'SMAPE':>8} {'OWA':>8}\n")
+            f.write(f"{'Frequency':<14} {'SMAPE':>8} {'OWA':>8} {'MAPE':>8} {'MASE':>8}\n")
         for key in ['Yearly', 'Quarterly', 'Monthly', 'Others', 'Average']:
             s = smapes.get(key, float('nan'))
             o = owas.get(key,   float('nan'))
