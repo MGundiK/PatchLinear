@@ -175,5 +175,5 @@ class Exp_M4:
             file_path=os.path.join(forecast_dir, ''),
             root_path=self.args.root_path,
         )
-        smapes, owas, mapes, mases = summary.evaluate()
-        return smapes, owas
+        smapes, owas, mape, mase = summary.evaluate()
+        return smapes, owas, mape, mase
