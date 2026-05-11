@@ -153,7 +153,7 @@ else:
         o = owas.get(key,   float('nan'))
         mp = mape.get(key,   float('nan'))
         ms = mase.get(key,   float('nan'))
-        print(f"{key:<14} {s:>8.3f} {o:>8.3f}")
+        print(f"{key:<14} {s:>8.3f} {o:>8.3f} {mp:>8.3f} {ms:>8.3f}")
 
     results_path = 'logs/m4/results.txt'
     mode = 'a' if os.path.exists(results_path) else 'w'
@@ -166,5 +166,5 @@ else:
             o = owas.get(key,   float('nan'))
             mp = mape.get(key,   float('nan'))
             ms = mase.get(key,   float('nan'))
-            f.write(f"{key:<14} {s:>8.3f} {o:>8.3f}\n")
+            f.write(f"{key:<14} {s:>8.3f} {o:>8.3f} {mp:>8.3f} {ms:>8.3f}\n")
     print(f"\nResults saved to {results_path}")
