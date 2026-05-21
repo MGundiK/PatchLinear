@@ -3,30 +3,34 @@
 # Unified experiment runner for ablation study.
 #
 # Usage:
-#   bash run_experiments.sh             # full model only (baseline)
-#   bash run_experiments.sh --ablations # full model + all ablations
-#   bash run_experiments.sh --seeds     # full model, multiple seeds
+#   bash run_experiments.sh                      # full model only (all datasets)
+#   bash run_experiments.sh --ablations          # full model + all ablations
+#   bash run_experiments.sh --ablations-only     # ablations only  (skip full runs)
+#   bash run_experiments.sh --seeds              # full model, multiple seeds
+#   bash run_experiments.sh --from=ILI           # resume: skip datasets before ILI
 #
-# Structure:
-#   - DATASETS array defines all datasets with their per-dataset hyperparams
-#   - ABLATIONS dict defines all ablation configurations (one flag change each)
-#   - run_single() launches one python process and logs output
+# Flags can be combined, e.g.:
+#   bash run_experiments.sh --from=ILI           # finish ILI full run
+#   bash run_experiments.sh --ablations-only     # then run all ablations
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 # ── parse script-level flags ─────────────────────────────────────────────────
 RUN_ABLATIONS=0
+SKIP_FULL=0
 MULTI_SEED=0
+FROM_DATASET=""
 for arg in "$@"; do
   case $arg in
-    --ablations) RUN_ABLATIONS=1 ;;
-    --seeds)     MULTI_SEED=1 ;;
+    --ablations)        RUN_ABLATIONS=1 ;;
+    --ablations-only)   RUN_ABLATIONS=1; SKIP_FULL=1 ;;
+    --seeds)            MULTI_SEED=1 ;;
+    --from=*)           FROM_DATASET="${arg#--from=}" ;;
   esac
 done
 
 # ── global defaults ───────────────────────────────────────────────────────────
-MA_TYPE=ema
 ALPHA=0.3
 TRAIN_EPOCHS=100
 PATIENCE=10
@@ -35,13 +39,12 @@ LRADJ=sigmoid
 LOG_DIR=./logs
 mkdir -p "$LOG_DIR"
 
-# ── run_single(tag, dataset_args..., ablation_args...) ───────────────────────
+# ── run_single(tag, args...) ──────────────────────────────────────────────────
 run_single() {
   local tag="$1"; shift
   local log_file="${LOG_DIR}/${tag}.log"
   echo ">>> $tag"
   python -u run.py "$@" > "$log_file" 2>&1
-  # Extract and echo the final mse/mae line for quick monitoring
   tail -3 "$log_file" | grep -E "mse:|Epoch" || true
 }
 
@@ -50,7 +53,7 @@ run_single() {
 # Columns: name  data_path  data_type  enc_in  batch  lr  pred_lens
 #          seq_len  d_model  t_ff  patch_len  stride  dw_kernel  c_ff
 #
-# All hyperparameters are per-dataset (Table 4).  Bold = tuned from default.
+# Per-dataset hyperparameters (Table 4). Bold = tuned from default.
 # Default: d=64, tff=128, p=16, s=8, k=7, cff=16, lr=5e-4.
 # ─────────────────────────────────────────────────────────────────────────────
 declare -a DATASETS=(
@@ -69,36 +72,36 @@ declare -a DATASETS=(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ABLATION CONFIGURATIONS
-# Each entry: "name  flag=value"
-# The full model has all flags at their default (1 / dataset default).
-# Each ablation changes exactly one flag so the source of any
-# performance change is unambiguous.
+# Each entry: "name  flag(s)"  — changes exactly one design decision.
+# Logical order follows the forward pass:
+#   A1  decomposition → A2 streams → A3 fusion gate → A3b TGM
+#   → A4a cross-channel VGM → A4b alpha gate → A6 kernel size
 # ─────────────────────────────────────────────────────────────────────────────
 declare -a ABLATION_CONFIGS=(
-  # A1: decomposition
+  # A1: EMA decomposition
   "A1_no_decomp         --use_decomp 0"
 
-  # A2: stream ablations
+  # A2: individual stream ablations
   "A2a_trend_only       --use_seas_stream 0 --use_fusion_gate 0"
   "A2b_seasonal_only    --use_trend_stream 0 --use_fusion_gate 0"
 
-  # A3: fusion gate
+  # A3: input-dependent fusion gate
   "A3_no_fusion_gate    --use_fusion_gate 0"
+
+  # A3b: temporal global module (TGM)
+  # Sits between the fusion gate (A3) and the cross-channel VGM (A4a).
+  # Without TGM, glob_updated falls back to the raw learned g_0 — a static
+  # parameter shared across all batch instances.  The VGM still runs but is
+  # driven by a fixed token rather than input-conditioned information.
+  # Expected to hurt most on Traffic / Electricity (dynamic cross-channel
+  # patterns) and least on Exchange (alpha already suppresses cross-channel).
+  "A3b_no_tgm           --use_tgm 0"
 
   # A4a: cross-channel VGM
   "A4a_no_cross_ch      --use_cross_channel 0"
 
   # A4b: per-channel alpha mixing gate (keep cross-channel, disable alpha)
   "A4b_no_alpha         --use_alpha_gate 0"
-
-  # A3b: temporal global module
-  # Sits between the fusion gate (A3) and the cross-channel VGM (A4a).
-  # Without TGM, glob_updated falls back to the raw learned g_0 — a static
-  # parameter shared across all batch instances.  The VGM still runs but is
-  # driven by a fixed token rather than input-conditioned information.
-  # Expected to hurt most on Traffic and Electricity (dynamic cross-channel
-  # patterns) and least on Exchange (alpha already suppresses cross-channel).
-  "A3b_no_tgm           --use_tgm 0"
 
   # A6: DWConv kernel size (compare against per-dataset default k)
   "A6_dw_k3             --dw_kernel 3"
@@ -107,9 +110,14 @@ declare -a ABLATION_CONFIGS=(
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Seeds for multi-seed runs
-# Only run after you have confirmed the full model is competitive.
 # ─────────────────────────────────────────────────────────────────────────────
 SEEDS=(2021 2022 2023)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Resume support: --from=NAME skips every dataset before NAME.
+# ─────────────────────────────────────────────────────────────────────────────
+PAST_RESUME=0
+[ -z "$FROM_DATASET" ] && PAST_RESUME=1
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Main loop
@@ -119,11 +127,19 @@ for dataset_entry in "${DATASETS[@]}"; do
        SEQ_LEN D_MODEL T_FF PATCH_LEN STRIDE DW_KERNEL C_FF \
        <<< "$dataset_entry"
 
+  # ── resume-from guard ───────────────────────────────────────────────────────
+  if [ "$PAST_RESUME" -eq 0 ]; then
+    [ "$NAME" = "$FROM_DATASET" ] && PAST_RESUME=1 || continue
+  fi
+
   IFS=',' read -ra PRED_LENS <<< "$PRED_LENS_CSV"
+
+  # label_len must not exceed seq_len; cap at min(48, seq_len // 2)
+  LABEL_LEN=$(( SEQ_LEN / 2 ))
+  [ "$LABEL_LEN" -gt 48 ] && LABEL_LEN=48
 
   for PRED_LEN in "${PRED_LENS[@]}"; do
 
-    # Common args shared by every run for this dataset+pred_len
     COMMON=(
       --is_training 1
       --root_path ./dataset/
@@ -132,7 +148,7 @@ for dataset_entry in "${DATASETS[@]}"; do
       --features M
       --seq_len "${SEQ_LEN}"
       --pred_len "${PRED_LEN}"
-      --label_len 48
+      --label_len "${LABEL_LEN}"
       --enc_in "${ENC_IN}"
       --d_model "${D_MODEL}"
       --t_ff "${T_FF}"
@@ -150,20 +166,22 @@ for dataset_entry in "${DATASETS[@]}"; do
     )
 
     # ── Full model (baseline) ─────────────────────────────────────────────────
-    if [ "$MULTI_SEED" -eq 1 ]; then
-      for SEED in "${SEEDS[@]}"; do
-        TAG="${NAME}_pl${PRED_LEN}_full_s${SEED}"
+    if [ "$SKIP_FULL" -eq 0 ]; then
+      if [ "$MULTI_SEED" -eq 1 ]; then
+        for SEED in "${SEEDS[@]}"; do
+          TAG="${NAME}_pl${PRED_LEN}_full_s${SEED}"
+          run_single "$TAG" \
+            --model_id "${NAME}_${PRED_LEN}_full_s${SEED}" \
+            --seed "${SEED}" \
+            "${COMMON[@]}"
+        done
+      else
+        TAG="${NAME}_pl${PRED_LEN}_full"
         run_single "$TAG" \
-          --model_id "${NAME}_${PRED_LEN}_full_s${SEED}" \
-          --seed "${SEED}" \
+          --model_id "${NAME}_${PRED_LEN}_full" \
+          --seed 2021 \
           "${COMMON[@]}"
-      done
-    else
-      TAG="${NAME}_pl${PRED_LEN}_full"
-      run_single "$TAG" \
-        --model_id "${NAME}_${PRED_LEN}_full" \
-        --seed 2021 \
-        "${COMMON[@]}"
+      fi
     fi
 
     # ── Ablations ─────────────────────────────────────────────────────────────
