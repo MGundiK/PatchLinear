@@ -34,7 +34,7 @@ done
 ALPHA=0.3
 TRAIN_EPOCHS=100
 PATIENCE=10
-LRADJ=sigmoid
+# lradj is now per-dataset (see DATASETS array; ILI uses type3, all others sigmoid)
 
 LOG_DIR=./logs
 mkdir -p "$LOG_DIR"
@@ -58,16 +58,16 @@ run_single() {
 # ─────────────────────────────────────────────────────────────────────────────
 declare -a DATASETS=(
   # name        data_path             data_type  enc_in  batch   lr          pred_lens        seq_len  d    tff  p   s  k  cff
-  "ETTh1        ETTh1.csv             ETTh1      7       2048    0.0005      96,192,336,720   96       64   128  16  8  7  16"
-  "ETTh2        ETTh2.csv             ETTh2      7       2048    0.0005      96,192,336,720   96       64   128  16  8  7  16"
-  "ETTm1        ETTm1.csv             ETTm1      7       2048    0.0005      96,192,336,720   96       64   128  16  8  7  16"
-  "ETTm2        ETTm2.csv             ETTm2      7       2048    0.0001      96,192,336,720   96       64   128  16  8  7  16"
-  "Weather      weather.csv           custom     21      2048    0.0005      96,192,336,720   96       64   128  16  8  7  16"
-  "Traffic      traffic.csv           custom     862     64      0.005       96,192,336,720   96       256  512  16  8  7  128"
-  "Electricity  electricity.csv       custom     321     256     0.01        96,192,336,720   96       256  512  16  8  7  128"
-  "Exchange     exchange_rate.csv     custom     8       32      0.000002    96,192,336,720   96       64   128  8   4  3  16"
-  "Solar        solar.txt             Solar      137     512     0.0008      96,192,336,720   96       192  384  16  8  7  34"
-  "ILI          national_illness.csv  ILI        7       32      0.01        24,36,48,60      36       64   128  6   3  3  8"
+  "ETTh1        ETTh1.csv             ETTh1      7       2048    0.0005      96,192,336,720   96       64   128  16  8  7  16  sigmoid"
+  "ETTh2        ETTh2.csv             ETTh2      7       2048    0.0005      96,192,336,720   96       64   128  16  8  7  16  sigmoid"
+  "ETTm1        ETTm1.csv             ETTm1      7       2048    0.0005      96,192,336,720   96       64   128  16  8  7  16  sigmoid"
+  "ETTm2        ETTm2.csv             ETTm2      7       2048    0.0001      96,192,336,720   96       64   128  16  8  7  16  sigmoid"
+  "Weather      weather.csv           custom     21      2048    0.0005      96,192,336,720   96       64   128  16  8  7  16  sigmoid"
+  "Traffic      traffic.csv           custom     862     64      0.005       96,192,336,720   96       256  512  16  8  7  128  sigmoid"
+  "Electricity  electricity.csv       custom     321     256     0.01        96,192,336,720   96       256  512  16  8  7  128  sigmoid"
+  "Exchange     exchange_rate.csv     custom     8       32      0.000002    96,192,336,720   96       64   128  8   4  3  16   sigmoid"
+  "Solar        solar.txt             Solar      137     512     0.0008      96,192,336,720   96       192  384  16  8  7  34  sigmoid"
+  "ILI          national_illness.csv  custom     7       32      0.01        24,36,48,60      36       64   128  6   3  3  8   type3"
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -124,7 +124,7 @@ PAST_RESUME=0
 # ─────────────────────────────────────────────────────────────────────────────
 for dataset_entry in "${DATASETS[@]}"; do
   read -r NAME DATA_PATH DATA_TYPE ENC_IN BATCH_SIZE LR PRED_LENS_CSV \
-       SEQ_LEN D_MODEL T_FF PATCH_LEN STRIDE DW_KERNEL C_FF \
+       SEQ_LEN D_MODEL T_FF PATCH_LEN STRIDE DW_KERNEL C_FF LRADJ
        <<< "$dataset_entry"
 
   # ── resume-from guard ───────────────────────────────────────────────────────
