@@ -25,7 +25,9 @@ def RMSE(pred, true):
 
 
 def MAPE(pred, true):
-    return np.mean(np.abs((pred - true) / true))
+    mape = np.abs((pred - true) / true)
+    mape = np.where(mape > 5, 0, mape)
+    return np.mean(mape)
 
 
 def MSPE(pred, true):
@@ -35,11 +37,11 @@ def MSPE(pred, true):
 def metric(pred, true):
     mae = MAE(pred, true)
     mse = MSE(pred, true)
-    # rmse = RMSE(pred, true)
-    # mape = MAPE(pred, true)
-    # mspe = MSPE(pred, true)
-    # rse = RSE(pred, true)
-    # corr = CORR(pred, true)
+    rmse = RMSE(pred, true)
+    mape = MAPE(pred, true)
+    mspe = MSPE(pred, true)
+    #rse = RSE(pred, true)
+    #corr = CORR(pred, true)
 
-    return mae, mse
-    # return mae, mse, rmse, mape, mspe, rse, corr
+    #return mae, mse
+    return mae, mse, rmse, mape, mspe #, rse, corr
