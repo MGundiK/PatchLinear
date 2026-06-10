@@ -32,6 +32,8 @@ parser.add_argument("--features",   type=str, default="M",
 parser.add_argument("--target",     type=str, default="OT")
 parser.add_argument("--freq",       type=str, default="h")
 parser.add_argument("--embed",      type=str, default="timeF")
+parser.add_argument('--seasonal_patterns', type=str, default='Monthly',
+                    help='M4 only: Yearly/Quarterly/Monthly/Weekly/Daily/Hourly')
 
 # ── forecasting ───────────────────────────────────────────────────────────────
 parser.add_argument("--seq_len",   type=int, default=96)
@@ -49,6 +51,8 @@ parser.add_argument("--dw_kernel",  type=int,   default=7,     # A6
                     help="DWConv kernel size: 3 / 7 / 13")
 parser.add_argument("--small_kernel", type=int, default=3)
 parser.add_argument("--alpha",      type=float, default=0.3)   # EMA smoothing
+parser.add_argument("--d_seas",     type=int,   default=0,
+                    help="Seasonal stream internal dim (0 = d_model)")
 
 # ── dropout ───────────────────────────────────────────────────────────────────
 parser.add_argument("--t_dropout",     type=float, default=0.1)
@@ -71,6 +75,10 @@ parser.add_argument("--use_cross_channel",  type=int, default=1,  # A4a
                     help="Cross-channel VGM (0/1)")
 parser.add_argument("--use_alpha_gate",     type=int, default=1,  # A4b
                     help="Per-channel alpha mixing gate (0/1)")
+parser.add_argument("--use_tgm",            type=int, default=1,  # A3b
+                    help="Temporal Global Module (0/1)")
+parser.add_argument("--use_late_fusion",    type=int, default=0,
+                    help="Late-fusion trend bypass (0/1)")
 
 # ── optimisation ──────────────────────────────────────────────────────────────
 parser.add_argument("--num_workers",    type=int,   default=10)
@@ -83,6 +91,7 @@ parser.add_argument("--des",           type=str,   default="Exp")
 parser.add_argument("--loss",          type=str,   default="mae")
 parser.add_argument("--lradj",         type=str,   default="sigmoid")
 parser.add_argument("--use_amp",       action="store_true", default=False)
+
 
 # ── GPU ───────────────────────────────────────────────────────────────────────
 parser.add_argument("--use_gpu",       type=bool, default=True)
@@ -105,6 +114,8 @@ args.use_seas_stream   = bool(args.use_seas_stream)
 args.use_fusion_gate   = bool(args.use_fusion_gate)
 args.use_cross_channel = bool(args.use_cross_channel)
 args.use_alpha_gate    = bool(args.use_alpha_gate)
+args.use_tgm           = bool(args.use_tgm)
+args.use_late_fusion   = bool(args.use_late_fusion)
 
 args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
 if args.use_gpu and args.use_multi_gpu:
@@ -127,6 +138,7 @@ if args.is_training:
             f"dec{int(args.use_decomp)}_"
             f"ts{int(args.use_trend_stream)}_ss{int(args.use_seas_stream)}_"
             f"fg{int(args.use_fusion_gate)}_"
+            f"tgm{int(args.use_tgm)}_"
             f"cc{int(args.use_cross_channel)}_ag{int(args.use_alpha_gate)}_"
             f"{args.des}_{ii}"
         )
@@ -145,6 +157,7 @@ else:
         f"dec{int(args.use_decomp)}_"
         f"ts{int(args.use_trend_stream)}_ss{int(args.use_seas_stream)}_"
         f"fg{int(args.use_fusion_gate)}_"
+        f"tgm{int(args.use_tgm)}_"
         f"cc{int(args.use_cross_channel)}_ag{int(args.use_alpha_gate)}_"
         f"{args.des}_{ii}"
     )

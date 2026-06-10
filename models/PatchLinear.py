@@ -37,6 +37,8 @@ class Model(nn.Module):
         if self.use_decomp:
             self.decomp = EMADecomp(alpha=configs.alpha)
 
+        self.use_late_fusion = getattr(configs, 'use_late_fusion', False)
+
         self.backbone = Backbone(
             seq_len           = configs.seq_len,
             d_model           = configs.d_model,
@@ -54,9 +56,20 @@ class Model(nn.Module):
             use_trend_stream  = configs.use_trend_stream,
             use_seas_stream   = configs.use_seas_stream,
             use_fusion_gate   = configs.use_fusion_gate,
+            use_tgm           = getattr(configs, 'use_tgm', True),
+            d_seas            = getattr(configs, 'd_seas', 0),
             use_cross_channel = configs.use_cross_channel,
             use_alpha_gate    = configs.use_alpha_gate,
         )
+
+        # Late-fusion bypass (Option A): direct trend → pred_len projection,
+        # combined in prediction space with backbone output (xPatch fc8-style).
+        if self.use_late_fusion:
+            _out = (configs.pred_len
+                    if getattr(configs, 'task_name', 'long_term_forecast')
+                    == 'long_term_forecast' else configs.seq_len)
+            self.trend_bypass = nn.Linear(configs.seq_len, _out)
+            self.late_gate    = nn.Linear(2 * _out, _out)
 
         # Forecasting head: [B, C, 2d] -> [B, C, pred_len]
         if self.task_name == 'long_term_forecast':
@@ -101,7 +114,15 @@ class Model(nn.Module):
             seasonal.permute(0, 2, 1),
             trend.permute(0, 2, 1),
         )                                        # [B, C, 2d]
-        pred = self.head(out).permute(0, 2, 1)  # [B, L or H, C]
+        pred = self.head(out)                    # [B, C, H]
+
+        if self.use_late_fusion:
+            pred_bypass = self.trend_bypass(trend.permute(0, 2, 1))  # [B, C, H]
+            pred = self.late_gate(
+                torch.cat([pred, pred_bypass], dim=-1)
+            )                                    # [B, C, H]
+
+        pred = pred.permute(0, 2, 1)             # [B, H, C]
         return self.revin(pred, 'denorm')
 
     def structural_reparam(self):

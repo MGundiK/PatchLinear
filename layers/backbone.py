@@ -258,6 +258,7 @@ class Backbone(nn.Module):
         use_trend_stream:  bool  = True,   # A2b: set False for seasonal-only
         use_seas_stream:   bool  = True,   # A2a: set False for trend-only
         use_fusion_gate:   bool  = True,   # A3
+        use_tgm:           bool  = True,   # A3b
         use_cross_channel: bool  = True,   # A4a
         use_alpha_gate:    bool  = True,   # A4b
     ):
@@ -269,6 +270,7 @@ class Backbone(nn.Module):
         self.use_cross_channel = use_cross_channel
         self.use_alpha_gate    = use_alpha_gate
         self.use_fusion_gate   = use_fusion_gate
+        self.use_tgm           = use_tgm
 
         assert use_trend_stream or use_seas_stream, \
             "At least one stream must be active."
@@ -303,7 +305,8 @@ class Backbone(nn.Module):
 
 
         # ── TGM: temporal gating (XLinear, unchanged) ─────────────────────────
-        self.tgm = GatingBlock(2 * d_model, t_ff, t_dropout)
+        if use_tgm:
+            self.tgm = GatingBlock(2 * d_model, t_ff, t_dropout)
 
         # ── VGM + alpha gate ───────────────────────────────────────────────────
         if use_cross_channel:
@@ -340,10 +343,14 @@ class Backbone(nn.Module):
         emb = self._encode(seasonal, trend)                      # [B, C, d]
 
         # TGM
-        glob     = self.glob_token.expand(B, -1, -1)             # [B, C, d]
-        en_gated = self.tgm(torch.cat([emb, glob], dim=-1))      # [B, C, 2d]
-        origin       = en_gated[:, :, : self.d_model]            # [B, C, d]
-        glob_updated = en_gated[:, :, self.d_model :]            # [B, C, d]
+        glob = self.glob_token.expand(B, -1, -1)                 # [B, C, d]
+        if self.use_tgm:
+            en_gated     = self.tgm(torch.cat([emb, glob], dim=-1))  # [B, C, 2d]
+            origin       = en_gated[:, :, :self.d_model]             # [B, C, d]
+            glob_updated = en_gated[:, :, self.d_model:]             # [B, C, d]
+        else:
+            origin       = emb
+            glob_updated = glob
 
         # VGM + alpha
         if self.use_cross_channel:
@@ -375,10 +382,14 @@ class Backbone(nn.Module):
             )
         B   = seasonal.shape[0]
         emb = self._encode(seasonal, trend)
-        glob     = self.glob_token.expand(B, -1, -1)
-        en_gated = self.tgm(torch.cat([emb, glob], dim=-1))
-        origin       = en_gated[:, :, : self.d_model]
-        glob_updated = en_gated[:, :, self.d_model :]
+        glob = self.glob_token.expand(B, -1, -1)
+        if self.use_tgm:
+            en_gated     = self.tgm(torch.cat([emb, glob], dim=-1))
+            origin       = en_gated[:, :, :self.d_model]
+            glob_updated = en_gated[:, :, self.d_model:]
+        else:
+            origin       = emb
+            glob_updated = glob
         ex_out     = self.vgm(
             torch.cat([emb, glob_updated], dim=1).permute(0, 2, 1)
         )
