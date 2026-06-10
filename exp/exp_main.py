@@ -182,7 +182,7 @@ class Exp_Main(Exp_Basic):
 
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
-        mae, mse = metric(preds, trues)
+        mae, mse, rmse, mape, mspe = metric(preds, trues)
         print(f'mse: {mse:.6f}  mae: {mae:.6f}')
         with open('result.txt', 'a') as f:
             f.write(f'{setting}\n')
