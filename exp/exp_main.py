@@ -1,7 +1,10 @@
 from data_provider.data_factory import data_provider
 from exp.exp_basic import Exp_Basic
-from models import xPatch
 from models import PatchLinear
+try:
+    from models import xPatch  # retained for import-order reproducibility
+except ImportError:
+    pass
 from utils.tools import EarlyStopping, adjust_learning_rate, visual
 from utils.metrics import metric
 
@@ -18,12 +21,6 @@ import math
 warnings.filterwarnings('ignore')
 
 
-
-
-# Model registry: add new models here without touching the rest of the file.
-
-
-
 class Exp_Main(Exp_Basic):
     def __init__(self, args):
         super().__init__(args)
@@ -32,15 +29,12 @@ class Exp_Main(Exp_Basic):
         model_dict = {
             'PatchLinear': PatchLinear,
         }
-        
         if self.args.model not in model_dict:
             raise ValueError(
                 f"Unknown model '{self.args.model}'. "
                 f"Available: {list(model_dict.keys())}"
             )
-
         model = model_dict[self.args.model].Model(self.args).float()
-
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model
@@ -55,9 +49,6 @@ class Exp_Main(Exp_Basic):
         return nn.MSELoss(), nn.L1Loss()
 
     def _arctan_ratio(self, pred_len, device):
-        # Arctangent loss weight schedule from xPatch.
-        # rho(i) = -arctan(i+1) + pi/4 + 1
-        # Downweights far-future steps where variance is highest.
         ratio = np.array(
             [-math.atan(i + 1) + math.pi / 4 + 1 for i in range(pred_len)]
         )
@@ -129,8 +120,6 @@ class Exp_Main(Exp_Basic):
                     time_now   = time.time()
 
             train_loss = np.mean(train_loss)
-            # Validation: weighted MAE matching training objective
-            # Test:       plain MSE matching benchmark protocol
             vali_loss  = self.vali(vali_loader, mae_criterion, use_loss_weight=True)
             test_loss  = self.vali(test_loader,  mse_criterion, use_loss_weight=False)
 
@@ -182,17 +171,30 @@ class Exp_Main(Exp_Basic):
 
         preds = np.concatenate(preds, axis=0)
         trues = np.concatenate(trues, axis=0)
-        mae, mse, rmse, mape, mspe = metric(preds, trues)
-        print(f'mse: {mse:.6f}  mae: {mae:.6f}')
-        with open('result.txt', 'a') as f:
-            f.write(f'{setting}\n')
-            f.write(f'mse:{mse:.6f}, mae:{mae:.6f}\n\n')
+
+        # ── PEMS: inverse-transform to raw traffic scale before metrics ───────
+        # Matches the TimeMixer / TimeMixer++ evaluation protocol.
+        # No effect on any other dataset — the branch is PEMS-only.
+        if self.args.data == 'PEMS':
+            B, T, C = preds.shape
+            preds = test_data.inverse_transform(preds.reshape(-1, C)).reshape(B, T, C)
+            trues = test_data.inverse_transform(trues.reshape(-1, C)).reshape(B, T, C)
+            mae, mse, rmse, mape, mspe = metric(preds, trues)
+            print(f'mse:{mse:.6f}, mae:{mae:.6f}, rmse:{rmse:.6f}, mape:{mape:.6f}')
+            with open('result.txt', 'a') as f:
+                f.write(f'{setting}\n')
+                f.write(f'mse:{mse:.6f}, mae:{mae:.6f}, rmse:{rmse:.6f}, mape:{mape:.6f}\n\n')
+        else:
+            mae, mse, rmse, mape, mspe = metric(preds, trues)
+            print(f'mse: {mse:.6f}  mae: {mae:.6f}')
+            with open('result.txt', 'a') as f:
+                f.write(f'{setting}\n')
+                f.write(f'mse:{mse:.6f}, mae:{mae:.6f}\n\n')
 
     def analyse_alpha(self, n_batches=10):
         """
         Compute mean alpha per channel over n_batches of test data.
         Used for the interpretability figure (A4b / A5).
-
         Returns tensor [C] of mean alpha values.
         Expected: high values on Traffic, low values on Exchange.
         """
@@ -206,7 +208,6 @@ class Exp_Main(Exp_Basic):
                 if i >= n_batches:
                     break
                 batch_x = batch_x.float().to(self.device)
-                # Reproduce the forward pre-processing to reach get_alpha_values
                 x = self.model.revin(batch_x, 'norm')
                 if self.model.use_decomp:
                     seasonal, trend = self.model.decomp(x)
@@ -215,6 +216,6 @@ class Exp_Main(Exp_Basic):
                 _, alpha = self.model.backbone.get_alpha_values(
                     seasonal.permute(0, 2, 1),
                     trend.permute(0, 2, 1),
-                )                                           # alpha: [B, C, 1]
+                )
                 all_alphas.append(alpha.squeeze(-1).mean(dim=0).cpu())
-        return torch.stack(all_alphas).mean(dim=0)         # [C]
+        return torch.stack(all_alphas).mean(dim=0)
