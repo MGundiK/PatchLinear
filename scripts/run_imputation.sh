@@ -122,15 +122,26 @@ echo ""
 echo "=== IMPUTATION RESULTS SUMMARY ==="
 echo "Results saved to $RESULT"
 echo ""
-echo "Average MSE per dataset (across 4 mask rates):"
+printf "  %-14s  %8s  %8s\n" "Dataset" "avg_MSE" "avg_MAE"
+printf "  %s\n" "$(printf '─%.0s' {1..34})"
+
 for DS in ETTh1 ETTh2 ETTm1 ETTm2 Weather Electricity; do
-  MSE_SUM=0; N=0
+  MSE_SUM=0; MAE_SUM=0; N=0
   for MR in "${MASK_RATES[@]}"; do
-    MSE=$(grep "mse:" "$LOG_DIR/${DS}_mr${MR}.log" 2>/dev/null | tail -1 | \
-          grep -oP 'mse:\K[\d.]+' || echo "0")
-    MSE_SUM=$(python3 -c "print($MSE_SUM+$MSE)")
+    LOG="${LOG_DIR}/${DS}_mr${MR}.log"
+    if [[ ! -f "$LOG" ]]; then continue; fi
+    # Fix: \s* handles the space between "mse:" and the number
+    MSE=$(grep "mse:" "$LOG" | tail -1 | grep -oP 'mse:\s*\K[\d.]+' || echo "0")
+    MAE=$(grep "mae:" "$LOG" | tail -1 | grep -oP 'mae:\s*\K[\d.]+' || echo "0")
+    MSE_SUM=$(python3 -c "print($MSE_SUM + $MSE)")
+    MAE_SUM=$(python3 -c "print($MAE_SUM + $MAE)")
     N=$((N+1))
   done
-  AVG=$(python3 -c "print(round($MSE_SUM/$N,4))")
-  echo "  $DS: $AVG"
+  if [[ $N -gt 0 ]]; then
+    AVG_MSE=$(python3 -c "print(f'{$MSE_SUM/$N:.4f}')")
+    AVG_MAE=$(python3 -c "print(f'{$MAE_SUM/$N:.4f}')")
+    printf "  %-14s  %8s  %8s  (%d/4 mask rates)\n" "$DS" "$AVG_MSE" "$AVG_MAE" "$N"
+  else
+    printf "  %-14s  %8s\n" "$DS" "no logs"
+  fi
 done
