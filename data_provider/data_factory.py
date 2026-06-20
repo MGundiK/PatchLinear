@@ -24,7 +24,8 @@ def data_provider(args, flag):
     # ── flag-level defaults ───────────────────────────────────────────────────
     if flag == 'test':
         shuffle_flag = False
-        drop_last    = False          # never drop on test
+        drop_last    = True          # never drop on test
+        # drop_last = False # without the "drop-last" trick
         batch_size   = args.batch_size
         freq         = args.freq
     elif flag == 'pred':
